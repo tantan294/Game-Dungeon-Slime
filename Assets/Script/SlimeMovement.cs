@@ -29,9 +29,21 @@ public class SlimeMovement : MonoBehaviour
     public bool IsSliding => isSliding;
     public LayerMask ObstacleLayer => obstacleLayer;
 
+    private Rigidbody2D rb;
+
     private void Awake()
     {
         boxCollider = GetComponent<BoxCollider2D>();
+
+        // Đảm bảo Slime có Rigidbody2D dạng Kinematic để Unity kích hoạt OnTriggerEnter2D khi chạm Gai
+        rb = GetComponent<Rigidbody2D>();
+        if (rb == null)
+        {
+            rb = gameObject.AddComponent<Rigidbody2D>();
+        }
+        rb.bodyType = RigidbodyType2D.Kinematic;
+        rb.gravityScale = 0f;
+        rb.constraints = RigidbodyConstraints2D.FreezeRotation;
     }
 
     private void Start()
@@ -152,7 +164,20 @@ public class SlimeMovement : MonoBehaviour
         }
         else
         {
-            Debug.LogWarning($"[Slime] Hướng {direction} không có bức tường nào chặn lại! Cần dựng tường bao quanh phòng.");
+            // NẾU KHÔNG CÓ TƯỜNG CHẶN: Kiểm tra xem phía trước có Cửa Thoát Hiểm (Exit) không!
+            RaycastHit2D[] allHits = Physics2D.BoxCastAll(transform.position, castBoxSize, 0f, direction, 100f);
+            foreach (var h in allHits)
+            {
+                if (h.collider != null && h.collider.GetComponent<LevelExit>() != null)
+                {
+                    // Tìm thấy Exit hợp lệ phía trước! Trượt thẳng vào cửa Exit để qua màn
+                    Vector2 targetPos = h.collider.transform.position;
+                    StartCoroutine(SlideRoutine(targetPos, direction));
+                    return;
+                }
+            }
+
+            Debug.LogWarning($"[Slime] Hướng {direction} không có bức tường nào chặn lại! Cần dựng tường bao quanh phòng hoặc đặt Cửa Exit.");
         }
     }
 
@@ -179,6 +204,24 @@ public class SlimeMovement : MonoBehaviour
 
         // Kích hoạt sự kiện đâm vào tường để đổi hình dạng
         OnHitWall?.Invoke(direction);
+    }
+
+    /// <summary>
+    /// Đưa Slime về vị trí chỉ định và hủy trạng thái đang trượt (dùng khi Restart/Respawn)
+    /// </summary>
+    public void ResetToPosition(Vector3 newPosition)
+    {
+        StopAllCoroutines();
+        transform.position = newPosition;
+        isSliding = false;
+    }
+
+    private void OnTriggerEnter2D(Collider2D collision)
+    {
+        if (collision.GetComponent<HazardSpike>() != null)
+        {
+            GameManager.Instance.OnSlimeDied();
+        }
     }
 
     private void OnDrawGizmosSelected()
