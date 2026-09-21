@@ -3442,10 +3442,10 @@ TextureImporter:
       name: Level01_151
       rect:
         serializedVersion: 2
-        x: 1984
+        x: 2000
         y: 256
-        width: 64
-        height: 64
+        width: 16
+        height: 16
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -3467,7 +3467,7 @@ TextureImporter:
         x: 2048
         y: 256
         width: 64
-        height: 64
+        height: 16
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -3486,7 +3486,7 @@ TextureImporter:
       name: Level01_153
       rect:
         serializedVersion: 2
-        x: 2112
+        x: 2109
         y: 256
         width: 64
         height: 64
@@ -4322,9 +4322,9 @@ TextureImporter:
       name: Level01_191
       rect:
         serializedVersion: 2
-        x: 1984
+        x: 2000
         y: 192
-        width: 64
+        width: 16
         height: 64
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
@@ -6456,13 +6456,13 @@ TextureImporter:
       name: Level01_288
       rect:
         serializedVersion: 2
-        x: 512
-        y: 0
-        width: 64
-        height: 64
+        x: 528
+        y: 48
+        width: 16
+        height: 16
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
+      border: {x: 0, y: 16, z: 10, w: 0}
       customData: 
       outline: []
       physicsShape: []
