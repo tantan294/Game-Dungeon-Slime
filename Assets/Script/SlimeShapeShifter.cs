@@ -158,9 +158,10 @@ public class SlimeShapeShifter : MonoBehaviour
         // Áp dụng nếu có sự thay đổi hình dạng
         if (nextShape != currentShape)
         {
+            SlimeShape prevShape = currentShape;
             ApplyShape(nextShape, hitDirection);
             Vector2 size = GetDimensions(nextShape);
-            Debug.Log($"[Slime] Đâm tường {(isHorizontal ? "Trái/Phải" : "Lên/Xuống")} -> Biến đổi từ {currentShape} thành {nextShape} (Kích thước: {size.x} x {size.y})");
+            Debug.Log($"[Slime] Đâm tường {(isHorizontal ? "Trái/Phải" : "Lên/Xuống")} -> Biến đổi từ {prevShape} thành {nextShape} (Kích thước: {size.x} x {size.y})");
         }
     }
 
@@ -215,9 +216,9 @@ public class SlimeShapeShifter : MonoBehaviour
     }
 
     /// <summary>
-    /// Thuật toán xử lý góc tường chính xác 100%:
-    /// - Khi đâm Trái/Phải: Trục dọc (Y) dãn dài (từ 6 lên 8) -> Nếu đang ở góc trần/sàn thì dời Y xuống/lên để không đâm thủng trần/sàn.
-    /// - Khi đâm Lên/Xuống: Trục ngang (X) dãn rộng (từ 6 lên 8) -> Nếu đang ở góc tường bên thì dời X sang trái/phải để không đâm thủng tường bên.
+    /// Thuật toán xử lý góc tường chính xác tuyệt đối:
+    /// - Khi đâm Trái/Phải: Trục dọc (Y) dãn dài -> Bỏ qua bức tường vừa đâm, chỉ kiểm tra Trần (ở trên) và Sàn (ở dưới) để chống xuyên tường.
+    /// - Khi đâm Lên/Xuống: Trục ngang (X) dãn rộng -> Bỏ qua trần/sàn vừa đâm, chỉ kiểm tra Tường Trái/Phải để chống xuyên tường.
     /// </summary>
     private void ClampToRoomBoundaries(Vector2 size, Vector2 hitDirection)
     {
@@ -240,40 +241,48 @@ public class SlimeShapeShifter : MonoBehaviour
             Bounds b = col.bounds;
 
             // TRƯỜNG HỢP 1: Đâm theo trục NGANG (Trái hoặc Phải)
-            // Lúc này chiều cao (Y) bị dãn từ 6 lên 8 -> Phải kiểm tra Trần và Sàn!
+            // Chiều cao (Y) bị dãn -> Chỉ kiểm tra Trần và Sàn, bỏ qua tường vừa đâm!
             if (Mathf.Abs(hitDirection.x) > 0.5f)
             {
-                // Slime có đang nằm trong phạm vi chiều ngang của bức tường này không?
+                // Bỏ qua bức tường Slime vừa đâm trúng
+                if (hitDirection.x > 0.5f && b.min.x >= pos.x + halfW - 0.15f) continue;
+                if (hitDirection.x < -0.5f && b.max.x <= pos.x - halfW + 0.15f) continue;
+
+                // Slime có đang nằm trong phạm vi chiều ngang của vật cản này không?
                 bool inXRange = (pos.x + halfW > b.min.x + 0.05f) && (pos.x - halfW < b.max.x - 0.05f);
                 if (inXRange)
                 {
-                    // Nếu đỉnh của Slime bị lấn xuyên vào Trần (tường ở phía trên):
-                    if (pos.y + halfH > b.min.y && pos.y < b.center.y)
+                    // Trần (vật cản nằm ở phía trên Slime: đáy của trần b.min.y phải cao hơn tâm Slime)
+                    if (b.min.y >= pos.y && pos.y + halfH > b.min.y)
                     {
                         pos.y = b.min.y - halfH; // Đẩy tụt xuống để mép trên chạm khít mép dưới của trần
                     }
-                    // Nếu đáy của Slime bị lấn xuyên vào Sàn (tường ở phía dưới):
-                    else if (pos.y - halfH < b.max.y && pos.y > b.center.y)
+                    // Sàn (vật cản nằm ở phía dưới Slime: đỉnh của sàn b.max.y phải thấp hơn tâm Slime)
+                    else if (b.max.y <= pos.y && pos.y - halfH < b.max.y)
                     {
                         pos.y = b.max.y + halfH; // Đẩy vọt lên để mép dưới chạm khít mép trên của sàn
                     }
                 }
             }
             // TRƯỜNG HỢP 2: Đâm theo trục DỌC (Lên hoặc Xuống)
-            // Lúc này bề ngang (X) bị dãn từ 6 lên 8 -> Phải kiểm tra Tường Trái và Tường Phải!
+            // Chiều ngang (X) bị dãn -> Chỉ kiểm tra Tường Trái và Tường Phải, bỏ qua trần/sàn vừa đâm!
             else if (Mathf.Abs(hitDirection.y) > 0.5f)
             {
-                // Slime có đang nằm trong phạm vi chiều dọc của bức tường này không?
+                // Bỏ qua trần hoặc sàn Slime vừa đâm trúng
+                if (hitDirection.y > 0.5f && b.min.y >= pos.y + halfH - 0.15f) continue;
+                if (hitDirection.y < -0.5f && b.max.y <= pos.y - halfH + 0.15f) continue;
+
+                // Slime có đang nằm trong phạm vi chiều dọc của vật cản này không?
                 bool inYRange = (pos.y + halfH > b.min.y + 0.05f) && (pos.y - halfH < b.max.y - 0.05f);
                 if (inYRange)
                 {
-                    // Nếu mép phải của Slime bị lấn xuyên vào Tường Phải:
-                    if (pos.x + halfW > b.min.x && pos.x < b.center.x)
+                    // Tường Phải (vật cản nằm bên phải: mép trái của tường b.min.x phải nằm bên phải tâm Slime)
+                    if (b.min.x >= pos.x && pos.x + halfW > b.min.x)
                     {
                         pos.x = b.min.x - halfW; // Đẩy sang trái để mép phải chạm khít mép trái của tường
                     }
-                    // Nếu mép trái của Slime bị lấn xuyên vào Tường Trái:
-                    else if (pos.x - halfW < b.max.x && pos.x > b.center.x)
+                    // Tường Trái (vật cản nằm bên trái: mép phải của tường b.max.x phải nằm bên trái tâm Slime)
+                    else if (b.max.x <= pos.x && pos.x - halfW < b.max.x)
                     {
                         pos.x = b.max.x + halfW; // Đẩy sang phải để mép trái chạm khít mép phải của tường
                     }
