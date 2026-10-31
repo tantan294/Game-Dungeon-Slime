@@ -36,6 +36,7 @@ public class GameManager : MonoBehaviour
     [Header("Tham chiếu Slime")]
     [SerializeField] private SlimeMovement slimeMovement;
     [SerializeField] private SlimeShapeShifter slimeShapeShifter;
+    private SlimeSplitter slimeSplitter;
 
     [Header("Cấu hình hồi sinh")]
     [Tooltip("Thời gian chờ hồi sinh sau khi chết (giây)")]
@@ -68,6 +69,26 @@ public class GameManager : MonoBehaviour
             return;
         }
         _instance = this;
+        DontDestroyOnLoad(gameObject);
+    }
+
+    private void OnEnable()
+    {
+        SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    private void OnDisable()
+    {
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+
+    private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        InitSlimeReferences();
+
+        // Ghi nhớ màn đang chơi để Menu hiển thị
+        int level = LevelProgress.GetLevelNumber(scene.name);
+        if (level > 0) LevelProgress.LastPlayed = level;
     }
 
     private void Start()
@@ -88,6 +109,13 @@ public class GameManager : MonoBehaviour
             slimeShapeShifter = slimeMovement.GetComponent<SlimeShapeShifter>();
             slimeSpriteRenderer = slimeMovement.GetComponent<SpriteRenderer>();
             spawnPosition = slimeMovement.transform.position;
+
+            // Gắn cơ chế Tách đôi (phím F) nếu Slime chưa có
+            slimeSplitter = slimeMovement.GetComponent<SlimeSplitter>();
+            if (slimeSplitter == null)
+            {
+                slimeSplitter = slimeMovement.gameObject.AddComponent<SlimeSplitter>();
+            }
         }
     }
 
@@ -99,8 +127,8 @@ public class GameManager : MonoBehaviour
             InitSlimeReferences();
         }
 
-        // Nhấn phím 'R' để Restart level tức thì
-        if (IsRestartPressed())
+        // Nhấn phím 'R' để Restart level tức thì (bỏ qua ở Menu, nơi không có Slime)
+        if (slimeMovement != null && IsRestartPressed())
         {
             RestartLevel();
         }
@@ -127,6 +155,20 @@ public class GameManager : MonoBehaviour
     {
         StopAllCoroutines();
         isDead = false;
+
+        if (UIManager.Instance != null)
+        {
+            UIManager.Instance.HideAllModals();
+        }
+
+        // Gộp lại nếu đang tách đôi (xóa nửa B, trả Slime chính về kích thước nguyên khối)
+        if (slimeSplitter != null)
+        {
+            slimeSplitter.ResetSplit();
+        }
+
+        // Đóng lại các cửa đã mở bằng nút nhấn
+        PlateDoor.CloseAll();
 
         if (slimeMovement != null)
         {
@@ -157,11 +199,67 @@ public class GameManager : MonoBehaviour
 
         Debug.Log("[GameManager] Slime đã chết vì bẫy gai! Đang chuẩn bị hồi sinh sau " + respawnDelay + "s...");
 
-        // Khóa điều khiển và ẩn hình ảnh Slime
-        if (slimeMovement != null) slimeMovement.enabled = false;
-        if (slimeSpriteRenderer != null) slimeSpriteRenderer.enabled = false;
+        // Khóa điều khiển và ẩn hình ảnh Slime (cả hai nửa nếu đang tách đôi)
+        foreach (var slime in DisableAllSlimes())
+        {
+            SpriteRenderer sr = slime.GetComponent<SpriteRenderer>();
+            if (sr != null) sr.enabled = false;
+        }
 
         StartCoroutine(RespawnRoutine());
+    }
+
+    /// <summary>
+    /// Khóa điều khiển tất cả Slime đang hoạt động, trả về danh sách vừa bị khóa
+    /// </summary>
+    private SlimeMovement[] DisableAllSlimes()
+    {
+        SlimeMovement[] slimes = SlimeMovement.ActiveSlimes.ToArray();
+        foreach (var slime in slimes)
+        {
+            slime.enabled = false;
+        }
+        return slimes;
+    }
+
+    /// <summary>
+    /// Slime (hoặc một nửa) chạm Cửa Exit. Khi đang tách đôi, nửa đến trước sẽ chui vào cửa chờ nửa còn lại.
+    /// Trả về true nếu màn chơi đã hoàn thành.
+    /// </summary>
+    public bool OnSlimeReachedExit(SlimeMovement slime, string nextSceneName)
+    {
+        bool otherHalfOutside = SlimeMovement.ActiveSlimes.Exists(s => s != slime);
+        if (otherHalfOutside)
+        {
+            Debug.Log("[GameManager] Một nửa Jelly đã vào cửa! Đưa nửa còn lại tới cửa để qua màn.");
+            slime.enabled = false;
+            StartCoroutine(ShrinkRoutine(slime));
+            return false;
+        }
+
+        OnLevelCompleted(nextSceneName, slime);
+        return true;
+    }
+
+    /// <summary>
+    /// Hiệu ứng Slime thu nhỏ dần vào tâm cổng Exit (0.35s) rồi ẩn đi
+    /// </summary>
+    private IEnumerator ShrinkRoutine(SlimeMovement slime)
+    {
+        Transform t = slime.transform;
+        Vector3 startScale = t.localScale;
+        float elapsed = 0f;
+        float shrinkDuration = 0.35f;
+
+        while (elapsed < shrinkDuration)
+        {
+            elapsed += Time.deltaTime;
+            t.localScale = Vector3.Lerp(startScale, Vector3.zero, elapsed / shrinkDuration);
+            yield return null;
+        }
+
+        SpriteRenderer sr = slime.GetComponent<SpriteRenderer>();
+        if (sr != null) sr.enabled = false;
     }
 
     private IEnumerator RespawnRoutine()
@@ -171,37 +269,37 @@ public class GameManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Xử lý khi Slime chạm vào Cửa thoát hiểm (Exit): Hiệu ứng thu nhỏ Slime và chuyển Scene mượt mà
+    /// Xử lý khi Slime chạm vào Cửa thoát hiểm (Exit): Hiệu ứng thu nhỏ Slime rồi chuyển ngay sang màn tiếp theo
     /// </summary>
-    public void OnLevelCompleted(string nextSceneName = "")
+    public void OnLevelCompleted(string nextSceneName = "", SlimeMovement finisher = null)
     {
-        Debug.Log("🎉 [GameManager] CHÚC MỪNG! BẠN ĐÃ VƯỢT QUA MÀN CHƠI! Đang chuyển sang Scene tiếp theo... 🎉");
+        Debug.Log("[GameManager] Đã vượt qua màn chơi!");
+        LevelProgress.MarkCleared(LevelProgress.GetLevelNumber(SceneManager.GetActiveScene().name));
 
         // Khóa điều khiển Slime
+        DisableAllSlimes();
         if (slimeMovement != null) slimeMovement.enabled = false;
 
-        StartCoroutine(LevelCompleteRoutine(nextSceneName));
+        StartCoroutine(LevelCompleteRoutine(nextSceneName, finisher != null ? finisher : slimeMovement));
     }
 
-    private IEnumerator LevelCompleteRoutine(string nextSceneName)
+    private IEnumerator LevelCompleteRoutine(string nextSceneName, SlimeMovement finisher)
     {
         // 1. Hiệu ứng Slime thu nhỏ dần vào tâm cổng Exit (0.35s)
-        if (slimeMovement != null)
+        if (finisher != null)
         {
-            Vector3 startScale = slimeMovement.transform.localScale;
-            float elapsed = 0f;
-            float shrinkDuration = 0.35f;
-
-            while (elapsed < shrinkDuration)
-            {
-                elapsed += Time.deltaTime;
-                slimeMovement.transform.localScale = Vector3.Lerp(startScale, Vector3.zero, elapsed / shrinkDuration);
-                yield return null;
-            }
-            if (slimeSpriteRenderer != null) slimeSpriteRenderer.enabled = false;
+            yield return ShrinkRoutine(finisher);
         }
 
-        // 2. Kích hoạt hiệu ứng Fade to Black chuyển Scene mượt mà
+        // 2. Chuyển thẳng sang màn tiếp theo (Fade), không hiện Modal Chiến Thắng
+        LoadNextScene(nextSceneName);
+    }
+
+    /// <summary>
+    /// Chuyển sang Scene tiếp theo có hiệu ứng làm mờ màn hình (Fade Out)
+    /// </summary>
+    public void LoadNextScene(string nextSceneName = "")
+    {
         if (SceneFader.Instance != null)
         {
             SceneFader.Instance.FadeToScene(nextSceneName, 0.4f);
@@ -224,8 +322,8 @@ public class GameManager : MonoBehaviour
                 }
                 else
                 {
-                    Debug.Log("[GameManager] Đã hoàn thành màn cuối cùng! Quay về màn đầu tiên.");
-                    SceneManager.LoadScene(0);
+                    Debug.Log("[GameManager] Đã hoàn thành màn cuối cùng! Quay về Menu.");
+                    SceneManager.LoadScene(LevelProgress.MenuScene);
                 }
             }
         }

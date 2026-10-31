@@ -47,13 +47,10 @@ public class LevelExit : MonoBehaviour
         if (isCleared) return;
 
         SlimeMovement slime = other.GetComponent<SlimeMovement>();
-        if (slime != null)
+        // Bỏ qua nửa Jelly đã chui vào cửa (đang chờ nửa còn lại)
+        if (slime != null && slime.enabled && GameManager.Instance != null)
         {
-            isCleared = true;
-            if (GameManager.Instance != null)
-            {
-                GameManager.Instance.OnLevelCompleted(nextSceneName);
-            }
+            isCleared = GameManager.Instance.OnSlimeReachedExit(slime, nextSceneName);
         }
     }
 }

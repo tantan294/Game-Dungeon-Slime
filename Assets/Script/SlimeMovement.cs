@@ -1,9 +1,20 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
+
+/// <summary>
+/// Bộ phím điều khiển Slime: Both khi còn nguyên khối, WASD/Arrows khi đã tách đôi
+/// </summary>
+public enum SlimeControlScheme
+{
+    Both,
+    WASD,
+    Arrows
+}
 
 /// <summary>
 /// Quản lý di chuyển trượt theo dạng lưới của Slime.
@@ -19,21 +30,49 @@ public class SlimeMovement : MonoBehaviour
     [Tooltip("Layer chứa các vật cản (Tường, Khối đá)")]
     [SerializeField] private LayerMask obstacleLayer;
 
+    [Tooltip("Phím điều khiển Slime này (tự đổi khi tách đôi / hợp nhất)")]
+    [SerializeField] private SlimeControlScheme controlScheme = SlimeControlScheme.Both;
+
+    // Danh sách các Slime đang hoạt động (khi tách đôi, các nửa chặn đường nhau như vật cản)
+    public static readonly List<SlimeMovement> ActiveSlimes = new List<SlimeMovement>();
+
     // Trạng thái nội bộ
     private bool isSliding = false;
+    private Vector2 slideTarget;
     private BoxCollider2D boxCollider;
 
     // Sự kiện khi va chạm vào tường sau khi trượt xong (để kích hoạt đổi hình dạng)
     public System.Action<Vector2> OnHitWall;
 
     public bool IsSliding => isSliding;
+    public SlimeShapeShifter Shifter { get; private set; }
     public LayerMask ObstacleLayer => obstacleLayer;
+
+    public SlimeControlScheme ControlScheme
+    {
+        get => controlScheme;
+        set => controlScheme = value;
+    }
+
+    /// <summary>
+    /// Vùng thân Slime chiếm giữ (nếu đang trượt thì tính tại điểm đích để nửa kia không lao vào chỗ đó)
+    /// </summary>
+    public Rect OccupiedRect
+    {
+        get
+        {
+            Vector2 size = new Vector2(Mathf.Abs(transform.lossyScale.x), Mathf.Abs(transform.lossyScale.y));
+            Vector2 center = isSliding ? slideTarget : (Vector2)transform.position;
+            return new Rect(center - size * 0.5f, size);
+        }
+    }
 
     private Rigidbody2D rb;
 
     private void Awake()
     {
         boxCollider = GetComponent<BoxCollider2D>();
+        Shifter = GetComponent<SlimeShapeShifter>();
 
         // Đảm bảo Slime có Rigidbody2D dạng Kinematic để Unity kích hoạt OnTriggerEnter2D khi chạm Gai
         rb = GetComponent<Rigidbody2D>();
@@ -44,6 +83,16 @@ public class SlimeMovement : MonoBehaviour
         rb.bodyType = RigidbodyType2D.Kinematic;
         rb.gravityScale = 0f;
         rb.constraints = RigidbodyConstraints2D.FreezeRotation;
+    }
+
+    private void OnEnable()
+    {
+        if (!ActiveSlimes.Contains(this)) ActiveSlimes.Add(this);
+    }
+
+    private void OnDisable()
+    {
+        ActiveSlimes.Remove(this);
     }
 
     private void Start()
@@ -68,26 +117,29 @@ public class SlimeMovement : MonoBehaviour
     }
 
     /// <summary>
-    /// Đọc input từ bàn phím (hỗ trợ cả Input System mới và cũ của Unity)
+    /// Đọc input từ bàn phím (hỗ trợ cả Input System mới và cũ của Unity), lọc theo bộ phím của Slime này
     /// </summary>
     private Vector2 GetInputDirection()
     {
+        bool wasd = controlScheme != SlimeControlScheme.Arrows;
+        bool arrows = controlScheme != SlimeControlScheme.WASD;
+
 #if ENABLE_INPUT_SYSTEM
         var kb = Keyboard.current;
         if (kb != null)
         {
-            if (kb.wKey.wasPressedThisFrame || kb.upArrowKey.wasPressedThisFrame) return Vector2.up;
-            if (kb.sKey.wasPressedThisFrame || kb.downArrowKey.wasPressedThisFrame) return Vector2.down;
-            if (kb.aKey.wasPressedThisFrame || kb.leftArrowKey.wasPressedThisFrame) return Vector2.left;
-            if (kb.dKey.wasPressedThisFrame || kb.rightArrowKey.wasPressedThisFrame) return Vector2.right;
+            if ((wasd && kb.wKey.wasPressedThisFrame) || (arrows && kb.upArrowKey.wasPressedThisFrame)) return Vector2.up;
+            if ((wasd && kb.sKey.wasPressedThisFrame) || (arrows && kb.downArrowKey.wasPressedThisFrame)) return Vector2.down;
+            if ((wasd && kb.aKey.wasPressedThisFrame) || (arrows && kb.leftArrowKey.wasPressedThisFrame)) return Vector2.left;
+            if ((wasd && kb.dKey.wasPressedThisFrame) || (arrows && kb.rightArrowKey.wasPressedThisFrame)) return Vector2.right;
         }
 #endif
 
 #if ENABLE_LEGACY_INPUT_MANAGER
-        if (Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow)) return Vector2.up;
-        if (Input.GetKeyDown(KeyCode.S) || Input.GetKeyDown(KeyCode.DownArrow)) return Vector2.down;
-        if (Input.GetKeyDown(KeyCode.A) || Input.GetKeyDown(KeyCode.LeftArrow)) return Vector2.left;
-        if (Input.GetKeyDown(KeyCode.D) || Input.GetKeyDown(KeyCode.RightArrow)) return Vector2.right;
+        if ((wasd && Input.GetKeyDown(KeyCode.W)) || (arrows && Input.GetKeyDown(KeyCode.UpArrow))) return Vector2.up;
+        if ((wasd && Input.GetKeyDown(KeyCode.S)) || (arrows && Input.GetKeyDown(KeyCode.DownArrow))) return Vector2.down;
+        if ((wasd && Input.GetKeyDown(KeyCode.A)) || (arrows && Input.GetKeyDown(KeyCode.LeftArrow))) return Vector2.left;
+        if ((wasd && Input.GetKeyDown(KeyCode.D)) || (arrows && Input.GetKeyDown(KeyCode.RightArrow))) return Vector2.right;
 #endif
 
         return Vector2.zero;
@@ -121,7 +173,6 @@ public class SlimeMovement : MonoBehaviour
 
         if (colEnabled) boxCollider.enabled = true;
 
-        RaycastHit2D bestHit = default;
         float minDistance = float.MaxValue;
         bool foundWallInFront = false;
 
@@ -144,22 +195,28 @@ public class SlimeMovement : MonoBehaviour
             if (h.distance < minDistance)
             {
                 minDistance = h.distance;
-                bestHit = h;
                 foundWallInFront = true;
             }
+        }
+
+        // Nửa Slime còn lại (khi tách đôi) cũng chặn đường như một bức tường
+        if (TryGetSlimeBlockDistance(direction, castBoxSize, out float slimeDistance) && slimeDistance < minDistance)
+        {
+            minDistance = slimeDistance;
+            foundWallInFront = true;
         }
 
         if (foundWallInFront)
         {
             // Nếu đang đứng sát bức tường phía trước (< 0.05) thì không thể đi tiếp hướng này
-            if (bestHit.distance < 0.05f)
+            if (minDistance < 0.05f)
             {
                 Debug.Log($"[Slime] Đang áp sát tường phía trước ({direction}), hãy chọn hướng khác!");
                 return;
             }
 
             // Trượt chính xác tới mép tường phía trước
-            Vector2 targetPos = (Vector2)transform.position + direction * bestHit.distance;
+            Vector2 targetPos = (Vector2)transform.position + direction * minDistance;
             StartCoroutine(SlideRoutine(targetPos, direction));
         }
         else
@@ -182,11 +239,52 @@ public class SlimeMovement : MonoBehaviour
     }
 
     /// <summary>
+    /// Tìm khoảng cách tới nửa Slime khác nằm chắn trên làn trượt (so sánh hình chữ nhật thẳng trục)
+    /// </summary>
+    private bool TryGetSlimeBlockDistance(Vector2 direction, Vector2 castBoxSize, out float distance)
+    {
+        distance = float.MaxValue;
+        bool found = false;
+        bool horizontal = Mathf.Abs(direction.x) > 0.5f;
+        float sign = horizontal ? Mathf.Sign(direction.x) : Mathf.Sign(direction.y);
+        Vector2 pos = transform.position;
+        Vector2 half = castBoxSize * 0.5f;
+        float laneMin = horizontal ? pos.y - half.y : pos.x - half.x;
+        float laneMax = horizontal ? pos.y + half.y : pos.x + half.x;
+        float myFront = horizontal ? pos.x + sign * half.x : pos.y + sign * half.y;
+
+        foreach (var other in ActiveSlimes)
+        {
+            if (other == this) continue;
+            Rect r = other.OccupiedRect;
+
+            // Chỉ chặn khi nằm cùng làn trượt (chồng lấn theo trục vuông góc)
+            float otherLaneMin = horizontal ? r.yMin : r.xMin;
+            float otherLaneMax = horizontal ? r.yMax : r.xMax;
+            if (laneMax <= otherLaneMin || laneMin >= otherLaneMax) continue;
+
+            // Khoảng cách từ mép trước của Slime này tới mép gần của nửa kia
+            float otherNear = horizontal ? (sign > 0 ? r.xMin : r.xMax) : (sign > 0 ? r.yMin : r.yMax);
+            float d = (otherNear - myFront) * sign;
+            if (d < -0.05f) continue; // Nằm phía sau lưng
+
+            d = Mathf.Max(0f, d);
+            if (d < distance)
+            {
+                distance = d;
+                found = true;
+            }
+        }
+        return found;
+    }
+
+    /// <summary>
     /// Coroutine di chuyển Slime mượt mà từ vị trí hiện tại tới điểm đích
     /// </summary>
     private IEnumerator SlideRoutine(Vector2 targetPos, Vector2 direction)
     {
         isSliding = true;
+        slideTarget = targetPos;
 
         while (Vector2.Distance(transform.position, targetPos) > 0.001f)
         {

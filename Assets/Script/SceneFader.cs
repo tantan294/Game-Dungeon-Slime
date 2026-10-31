@@ -105,8 +105,8 @@ public class SceneFader : MonoBehaviour
             }
             else
             {
-                Debug.Log("[SceneFader] Đã hết các màn chơi! Quay về màn đầu tiên.");
-                SceneManager.LoadScene(0);
+                Debug.Log("[SceneFader] Đã hết các màn chơi! Quay về Menu.");
+                SceneManager.LoadScene(LevelProgress.MenuScene);
             }
         }
     }
